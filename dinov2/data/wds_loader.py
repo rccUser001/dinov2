@@ -68,6 +68,7 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
             wds.WebDataset(shards, shardshuffle=False)
             .pipe(wds.split_by_node)
             .pipe(wds.split_by_worker)
+            .shuffle(1000)
             .decode("pil")
             .to_tuple("jpg;jpeg;png", "__key__")
             .map_tuple(self.image_transform, lambda key: ())
