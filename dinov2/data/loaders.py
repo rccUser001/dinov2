@@ -150,6 +150,10 @@ def _make_sampler(
     size: int = -1,
     advance: int = 0,
 ) -> Optional[Sampler]:
+    if type is None:
+        logger.info("sampler: none")
+        return None
+
     sample_count = len(dataset)
 
     if type == SamplerType.INFINITE:

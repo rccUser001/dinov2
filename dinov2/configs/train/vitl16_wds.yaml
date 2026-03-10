@@ -1,0 +1,12 @@
+# example configuration using a webdataset of tar shards
+train:
+  dataset_path: webdataset
+  batch_size_per_gpu: 32
+  slideflow:
+    webdataset_path: "<path-to-webdataset-shards>"
+
+evaluation:
+  eval_period_iterations: 125000
+
+student:
+  block_chunks: 4
