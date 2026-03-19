@@ -152,9 +152,17 @@ def add_residual(x, brange, residual, residual_scale_factor, scaling_vector=None
         residual = residual.flatten(1)
         x_plus_residual = torch.index_add(x_flat, 0, brange, residual.to(dtype=x.dtype), alpha=residual_scale_factor)
     else:
-        x_plus_residual = scaled_index_add(
-            x, brange, residual.to(dtype=x.dtype), scaling=scaling_vector, alpha=residual_scale_factor
-        )
+        try:
+            x_plus_residual = scaled_index_add(
+                x, brange, residual.to(dtype=x.dtype), scaling=scaling_vector, alpha=residual_scale_factor
+            )
+        except RuntimeError:
+            # xformers scaled_index_add may have alignment requirements.
+            # Fall back to plain PyTorch equivalent.
+            x_plus_residual = x.clone()
+            x_plus_residual[brange] = x_plus_residual[brange] + (
+                residual.to(dtype=x.dtype) * scaling_vector * residual_scale_factor
+            )
     return x_plus_residual
 
 
@@ -177,7 +185,14 @@ def get_attn_bias_and_cat(x_list, branges=None):
         attn_bias_cache[all_shapes] = attn_bias
 
     if branges is not None:
-        cat_tensors = index_select_cat([x.flatten(1) for x in x_list], branges).view(1, -1, x_list[0].shape[-1])
+        try:
+            cat_tensors = index_select_cat([x.flatten(1) for x in x_list], branges).view(1, -1, x_list[0].shape[-1])
+        except RuntimeError:
+            # xformers index_select_cat requires the flattened dimension
+            # (seq_len * embed_dim) to be divisible by its internal block size.
+            # Fall back to plain PyTorch indexing when this is not satisfied.
+            cat_tensors = torch.cat([x[brange].flatten(1) for x, brange in zip(x_list, branges)], dim=0).unsqueeze(0)
+            cat_tensors = cat_tensors.view(1, -1, x_list[0].shape[-1])
     else:
         tensors_bs1 = tuple(x.reshape([1, -1, *x.shape[2:]]) for x in x_list)
         cat_tensors = torch.cat(tensors_bs1, dim=1)
