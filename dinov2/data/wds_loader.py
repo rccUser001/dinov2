@@ -65,9 +65,12 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
     def _make_pipeline(self):
         shards = self._get_shuffled_shards()
         pipeline = (
-            wds.WebDataset(shards, shardshuffle=False)
-            .pipe(wds.split_by_node)
-            .pipe(wds.split_by_worker)
+            wds.WebDataset(
+                shards,
+                shardshuffle=False,
+                nodesplitter=wds.split_by_node,
+                workersplitter=wds.split_by_worker,
+            )
             .shuffle(1000)
             .decode("pil")
             .to_tuple("jpg;jpeg;png", "__key__")
