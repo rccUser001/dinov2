@@ -249,12 +249,20 @@ class NestedTensorBlock(Block):
             x = x + ffn_residual_func(x)
             return attn_bias.split(x)
 
+    def forward_nested_no_xformers(self, x_list: List[Tensor]) -> List[Tensor]:
+        """
+        Pure PyTorch fallback for nested tensor processing.
+        Processes each tensor independently, which is semantically identical to
+        BlockDiagonalMask (each tensor only attends to itself).
+        """
+        return [super(NestedTensorBlock, self).forward(x) for x in x_list]
+
     def forward(self, x_or_x_list):
         if isinstance(x_or_x_list, Tensor):
             return super().forward(x_or_x_list)
         elif isinstance(x_or_x_list, list):
             if not XFORMERS_AVAILABLE:
-                raise AssertionError("xFormers is required for using nested tensors")
+                return self.forward_nested_no_xformers(x_or_x_list)
             return self.forward_nested(x_or_x_list)
         else:
             raise AssertionError
