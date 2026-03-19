@@ -158,7 +158,9 @@ def do_train(cfg, model, resume=False):
     # checkpointer
     checkpointer = FSDPCheckpointer(model, cfg.train.output_dir, optimizer=optimizer, save_to_disk=True)
 
-    start_iter = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
+    resume_data = checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume)
+    start_iter = resume_data.get("iteration", -1) + 1
+    start_shard_epoch = resume_data.get("shard_epoch", 0)
 
     OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
     max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH
@@ -218,6 +220,7 @@ def do_train(cfg, model, resume=False):
     if is_webdataset:
         from dinov2.data.wds_loader import make_webdataset
         dataset = make_webdataset(cfg_train=cfg.train, image_transform=data_transform)
+        dataset.set_epoch(start_shard_epoch)
         sampler_type = None
     else:
         dataset = make_dataset(
@@ -250,16 +253,13 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
-    for data in metric_logger.log_every(
-        data_loader,
-        10,
-        header,
-        max_iter,
-        start_iter,
-    ):
+    def _train_one_batch(data):
+        """Run a single training step. Returns True if max_iter exceeded."""
+        nonlocal iteration, total_tiles_seen
+
         current_batch_size = data["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
-            return
+            return True
 
         # apply schedules
 
@@ -324,6 +324,50 @@ def do_train(cfg, model, resume=False):
         periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
+        return False
+
+    if is_webdataset:
+        # For WebDataset: iterate one shard epoch at a time so we can
+        # checkpoint after each full pass through all shards.
+        shard_epoch = start_shard_epoch
+        done = False
+        while not done:
+            # Each iter() call on the DataLoader triggers __iter__ on the
+            # WebDatasetWrapper, which yields exactly one shard epoch.
+            for data in metric_logger.log_every(
+                data_loader,
+                10,
+                header,
+                max_iter,
+                start_iter,
+            ):
+                if _train_one_batch(data):
+                    done = True
+                    break
+
+            if not done:
+                shard_epoch += 1
+                logger.info(
+                    f"Shard epoch {shard_epoch} complete at iteration {iteration} "
+                    f"— saving checkpoint"
+                )
+                checkpointer.save(
+                    f"model_shard_epoch_{shard_epoch}",
+                    iteration=iteration,
+                    shard_epoch=shard_epoch,
+                )
+                dataset.advance_epoch()
+    else:
+        for data in metric_logger.log_every(
+            data_loader,
+            10,
+            header,
+            max_iter,
+            start_iter,
+        ):
+            if _train_one_batch(data):
+                break
+
     metric_logger.synchronize_between_processes()
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
