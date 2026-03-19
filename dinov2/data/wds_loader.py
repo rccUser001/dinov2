@@ -79,25 +79,12 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
         )
         return pipeline
 
-    def set_epoch(self, epoch):
-        """Set the current epoch (used for resuming from checkpoint)."""
-        self._epoch = epoch
-
-    def advance_epoch(self):
-        """Advance to the next shard epoch. Call between DataLoader iterations."""
-        self._epoch += 1
-
     def __iter__(self):
-        """Yield all samples from one shard epoch (one full pass through all shards).
-
-        This is intentionally finite. The training loop should create a new
-        DataLoader iterator (or call advance_epoch + re-iterate) for each
-        shard epoch, checkpointing in between.
-        """
-        logger.info(f"WebDataset: starting shard epoch {self._epoch} (seed={self.seed + self._epoch})")
-        pipeline = self._make_pipeline()
-        yield from pipeline
-        logger.info(f"WebDataset: completed shard epoch {self._epoch}")
+        while True:
+            logger.info(f"WebDataset: starting epoch {self._epoch} (seed={self.seed + self._epoch})")
+            pipeline = self._make_pipeline()
+            yield from pipeline
+            self._epoch += 1
 
 
 def make_webdataset(cfg_train, image_transform):
