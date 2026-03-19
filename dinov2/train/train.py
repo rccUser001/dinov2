@@ -243,6 +243,7 @@ def do_train(cfg, model, resume=False):
     # training loop
 
     iteration = start_iter
+    total_tiles_seen = start_iter * cfg.train.batch_size_per_gpu * distributed.get_global_size()
 
     logger.info("Starting training from iteration {}".format(start_iter))
     metrics_file = os.path.join(cfg.train.output_dir, "training_metrics.json")
@@ -305,11 +306,14 @@ def do_train(cfg, model, resume=False):
             raise AssertionError
         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
 
+        total_tiles_seen += int(current_batch_size) * distributed.get_global_size()
+
         metric_logger.update(lr=lr)
         metric_logger.update(wd=wd)
         metric_logger.update(mom=mom)
         metric_logger.update(last_layer_lr=last_layer_lr)
         metric_logger.update(current_batch_size=current_batch_size)
+        metric_logger.update(total_tiles_seen=total_tiles_seen)
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
 
         # checkpointing and testing
