@@ -28,7 +28,7 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
         image_transform: Callable (e.g. DataAugmentationDINO) applied to each PIL image.
         shard_pattern: Glob pattern for shard files relative to shards_path.
             Defaults to "tiles-*.tar".
-        shuffle_buffer: Number of samples for in-memory shuffle buffer.
+        shuffle_buffer: Number of samples for in-memory shuffle buffer (0 to disable).
         seed: Base seed for pseudorandom shard shuffling. Each epoch uses
             seed + epoch_number for reproducible but varying order.
     """
@@ -38,7 +38,7 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
         shards_path,
         image_transform,
         shard_pattern="tiles-*.tar",
-        shuffle_buffer=10000,
+        shuffle_buffer=0,
         seed=0,
     ):
         super().__init__()
@@ -70,20 +70,14 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
 
     def _make_pipeline(self):
         shards = self._get_shuffled_shards()
-        pipeline = (
-            wds.WebDataset(
-                shards,
-                shardshuffle=False,
-                nodesplitter=wds.split_by_node,
-                workersplitter=wds.split_by_worker,
-                handler=_skip_and_log,
-            )
-            .shuffle(1000)
-            .decode("pil")
-            .to_tuple("jpg;jpeg;png", "__key__")
-            .map_tuple(self.image_transform, lambda key: ())
-            .shuffle(self.shuffle_buffer)
-        )
+        pipeline = wds.WebDataset(
+            shards,
+            shardshuffle=False,
+            nodesplitter=wds.split_by_node,
+            workersplitter=wds.split_by_worker,
+        ).decode("pil").to_tuple("jpg;jpeg;png", "__key__").map_tuple(self.image_transform, lambda key: ())
+        if self.shuffle_buffer > 0:
+            pipeline = pipeline.shuffle(self.shuffle_buffer)
         return pipeline
 
     def __iter__(self):
@@ -100,7 +94,7 @@ def make_webdataset(cfg_train, image_transform):
     Config keys read from cfg_train.slideflow:
         webdataset_path (str): Directory containing shard tar files.
         shard_pattern (str, optional): Glob pattern for shards. Default "tiles-*.tar".
-        shuffle_buffer (int, optional): Sample shuffle buffer size. Default 10000.
+        shuffle_buffer (int, optional): Sample shuffle buffer size. Default 0 (disabled).
         seed (int, optional): Base seed for shard shuffling. Default 0.
 
     Args:
