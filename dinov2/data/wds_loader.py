@@ -9,6 +9,12 @@ import webdataset as wds
 logger = logging.getLogger("dinov2")
 
 
+def _skip_and_log(exn):
+    """Handler for WebDataset that logs warnings and skips bad samples."""
+    logger.warning(f"WebDataset: skipping sample due to error: {exn}")
+    return True
+
+
 class WebDatasetWrapper(torch.utils.data.IterableDataset):
     """PyTorch IterableDataset that streams images from WebDataset tar shards.
 
