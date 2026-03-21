@@ -70,6 +70,7 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
                 shardshuffle=False,
                 nodesplitter=wds.split_by_node,
                 workersplitter=wds.split_by_worker,
+                handler=wds.warn_and_continue,
             )
             .shuffle(1000)
             .decode("pil")
