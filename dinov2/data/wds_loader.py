@@ -68,6 +68,12 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
         rng.shuffle(shards)
         return shards
 
+    @staticmethod
+    def _warn_and_continue(exn):
+        """Log a warning and skip the sample instead of crashing."""
+        logger.warning(f"WebDataset: skipping sample due to error: {exn}")
+        return True
+
     def _make_pipeline(self):
         shards = self._get_shuffled_shards()
         pipeline = wds.WebDataset(
@@ -75,6 +81,7 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
             shardshuffle=False,
             nodesplitter=wds.split_by_node,
             workersplitter=wds.split_by_worker,
+            handler=self._warn_and_continue,
         ).decode("pil").to_tuple("jpg;jpeg;png", "__key__").map_tuple(self.image_transform, lambda key: ())
         if self.shuffle_buffer > 0:
             pipeline = pipeline.shuffle(self.shuffle_buffer)

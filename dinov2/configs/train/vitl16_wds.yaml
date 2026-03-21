@@ -2,10 +2,11 @@
 train:
   dataset_path: webdataset
   batch_size_per_gpu: 32
+  num_workers: 2
   slideflow:
     webdataset_path: "<path-to-webdataset-shards>"
     shard_pattern: "tiles-*.tar"   # glob pattern for shard files (default: tiles-*.tar)
-    shuffle_buffer: 10000          # sample-level shuffle buffer size (default: 10000)
+    shuffle_buffer: 0              # sample-level shuffle buffer size (0 to disable, default: 0)
     seed: 42                       # base seed for pseudorandom shard ordering per epoch
 
 evaluation:
