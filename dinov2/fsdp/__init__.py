@@ -111,6 +111,9 @@ class FSDPCheckpointer(Checkpointer):
             torch.save(data, f)
         self.tag_last_checkpoint(basename)
 
+    def _load_file(self, path):
+        return torch.load(path, map_location=torch.device("cpu"), weights_only=False)
+
     def load(self, *args, **kwargs):
         with FSDP.state_dict_type(self.model, StateDictType.FULL_STATE_DICT):
             return super().load(*args, **kwargs)
