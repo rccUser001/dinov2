@@ -58,10 +58,13 @@ class MetricLogger(object):
             iter_time=iter_time,
             data_time=data_time,
         )
-        dict_to_dump.update({k: v.median for k, v in self.meters.items()})
+        # Log raw latest value, windowed median, and global average for each metric
+        for k, v in self.meters.items():
+            dict_to_dump[k] = v.value
+            dict_to_dump[k + "_median"] = v.median
+            dict_to_dump[k + "_global_avg"] = v.global_avg
         with open(self.output_file, "a") as f:
             f.write(json.dumps(dict_to_dump) + "\n")
-        pass
 
     def log_every(self, iterable, print_freq, header=None, n_iterations=None, start_iteration=0):
         i = start_iteration
