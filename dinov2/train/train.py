@@ -90,10 +90,12 @@ def log_gradient_stats(model, iteration):
     """Log gradient norms for positional embeddings and key parameters."""
     logger.info(f"[Iter {iteration}] GRADIENT FLOW CHECK:")
 
-    # Check positional embeddings specifically
+    # Check positional embeddings specifically (student only; teacher is frozen via EMA)
     found_pos_embed = False
     for name, param in model.named_parameters():
         if "pos_embed" in name:
+            if name.startswith("teacher."):
+                continue
             found_pos_embed = True
             if param.grad is not None:
                 grad_norm = param.grad.norm().item()
@@ -104,7 +106,7 @@ def log_gradient_stats(model, iteration):
                 logger.warning(f"  {name}: NO GRADIENT (None)")
 
     if not found_pos_embed:
-        logger.warning("  No pos_embed parameters found in model!")
+        logger.warning("  No pos_embed parameters found in student model!")
 
     # Check a summary of all parameter groups
     total_params = 0
