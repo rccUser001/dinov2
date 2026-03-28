@@ -29,6 +29,115 @@ torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False 
 logger = logging.getLogger("dinov2")
 
 
+def verify_dataloader_output(data, cfg):
+    """One-time verification of dataloader output shapes and value ranges."""
+    n_global_crops = 2
+    n_local_crops = cfg.crops.local_crops_number
+    batch_size = cfg.train.batch_size_per_gpu
+    global_size = cfg.crops.global_crops_size
+    local_size = cfg.crops.local_crops_size
+    img_size = cfg.crops.global_crops_size
+    patch_size = cfg.student.patch_size
+    n_tokens = (img_size // patch_size) ** 2
+
+    logger.info("=" * 60)
+    logger.info("DATALOADER VERIFICATION")
+    logger.info("=" * 60)
+
+    # Check global crops
+    gc = data["collated_global_crops"]
+    expected_gc_shape = (n_global_crops * batch_size, 3, global_size, global_size)
+    logger.info(f"  global_crops shape: {tuple(gc.shape)} (expected: {expected_gc_shape})")
+    if tuple(gc.shape) != expected_gc_shape:
+        logger.warning(f"  MISMATCH in global_crops shape!")
+    logger.info(f"  global_crops dtype: {gc.dtype}, range: [{gc.min().item():.4f}, {gc.max().item():.4f}]")
+    if gc.min().item() == gc.max().item():
+        logger.warning(f"  global_crops has ZERO variance — all values identical!")
+
+    # Check local crops
+    lc = data["collated_local_crops"]
+    expected_lc_shape = (n_local_crops * batch_size, 3, local_size, local_size)
+    logger.info(f"  local_crops shape: {tuple(lc.shape)} (expected: {expected_lc_shape})")
+    if tuple(lc.shape) != expected_lc_shape:
+        logger.warning(f"  MISMATCH in local_crops shape!")
+    logger.info(f"  local_crops dtype: {lc.dtype}, range: [{lc.min().item():.4f}, {lc.max().item():.4f}]")
+
+    # Check masks
+    masks = data["collated_masks"]
+    logger.info(f"  masks shape: {tuple(masks.shape)}, dtype: {masks.dtype}")
+    logger.info(f"  masks — fraction masked: {masks.float().mean().item():.4f}")
+
+    # Check mask indices
+    mask_indices = data["mask_indices_list"]
+    logger.info(f"  mask_indices_list shape: {tuple(mask_indices.shape)}, dtype: {mask_indices.dtype}")
+    max_valid_index = n_global_crops * batch_size * n_tokens - 1
+    if mask_indices.numel() > 0 and mask_indices.max().item() > max_valid_index:
+        logger.warning(f"  mask_indices max {mask_indices.max().item()} exceeds valid range {max_valid_index}!")
+
+    # Check for NaN/Inf
+    for key in ["collated_global_crops", "collated_local_crops"]:
+        t = data[key]
+        if torch.isnan(t).any():
+            logger.warning(f"  {key} contains NaN values!")
+        if torch.isinf(t).any():
+            logger.warning(f"  {key} contains Inf values!")
+
+    logger.info("DATALOADER VERIFICATION COMPLETE")
+    logger.info("=" * 60)
+
+
+def log_gradient_stats(model, iteration):
+    """Log gradient norms for positional embeddings and key parameters."""
+    logger.info(f"[Iter {iteration}] GRADIENT FLOW CHECK:")
+
+    # Check positional embeddings specifically
+    found_pos_embed = False
+    for name, param in model.named_parameters():
+        if "pos_embed" in name:
+            found_pos_embed = True
+            if param.grad is not None:
+                grad_norm = param.grad.norm().item()
+                param_norm = param.data.norm().item()
+                logger.info(f"  {name}: grad_norm={grad_norm:.6f}, param_norm={param_norm:.6f}, "
+                            f"grad/param_ratio={grad_norm / (param_norm + 1e-8):.6f}")
+            else:
+                logger.warning(f"  {name}: NO GRADIENT (None)")
+
+    if not found_pos_embed:
+        logger.warning("  No pos_embed parameters found in model!")
+
+    # Check a summary of all parameter groups
+    total_params = 0
+    zero_grad_params = 0
+    no_grad_params = 0
+    grad_norms = {}
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        total_params += 1
+        if param.grad is None:
+            no_grad_params += 1
+        elif param.grad.norm().item() == 0.0:
+            zero_grad_params += 1
+
+        # Log norms per module group (backbone, dino_head, ibot_head)
+        group = name.split(".")[1] if "." in name else name
+        if group not in grad_norms:
+            grad_norms[group] = []
+        if param.grad is not None:
+            grad_norms[group].append(param.grad.norm().item())
+
+    for group, norms in grad_norms.items():
+        if norms:
+            avg_norm = sum(norms) / len(norms)
+            max_norm = max(norms)
+            logger.info(f"  {group}: avg_grad_norm={avg_norm:.6f}, max_grad_norm={max_norm:.6f}, "
+                        f"num_params={len(norms)}")
+
+    logger.info(f"  Summary: {total_params} trainable params, {no_grad_params} with no grad, "
+                f"{zero_grad_params} with zero grad")
+
+
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("DINOv2 training", add_help=add_help)
     parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
@@ -252,6 +361,8 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
 
+    dataloader_verified = False
+
     for data in metric_logger.log_every(
         data_loader,
         10,
@@ -262,6 +373,11 @@ def do_train(cfg, model, resume=False):
         current_batch_size = data["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
+
+        # One-time dataloader verification on first batch
+        if not dataloader_verified:
+            verify_dataloader_output(data, cfg)
+            dataloader_verified = True
 
         # apply schedules
 
@@ -298,6 +414,10 @@ def do_train(cfg, model, resume=False):
 
         # logging
 
+        # Gradient flow check every 100 iterations (before optimizer.zero_grad next iter)
+        if iteration % 100 == 0:
+            log_gradient_stats(model, iteration)
+
         if distributed.get_global_size() > 1:
             for v in loss_dict.values():
                 torch.distributed.all_reduce(v)
@@ -307,6 +427,11 @@ def do_train(cfg, model, resume=False):
             logger.info("NaN detected")
             raise AssertionError
         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+
+        # Log individual loss components every 10 iterations for debugging
+        if iteration % 10 == 0:
+            components = "  ".join(f"{k}={v:.6f}" for k, v in loss_dict_reduced.items())
+            logger.info(f"[Iter {iteration}] loss_components: total={losses_reduced:.6f}  {components}")
 
         total_tiles_seen += int(current_batch_size) * distributed.get_global_size()
 
