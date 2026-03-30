@@ -5,6 +5,7 @@
 
 from enum import Enum
 import os
+import platform
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -13,11 +14,14 @@ class ClusterType(Enum):
     AWS = "aws"
     FAIR = "fair"
     RSC = "rsc"
+    GRACE_HOPPER = "grace_hopper"
 
 
 def _guess_cluster_type() -> ClusterType:
     uname = os.uname()
     if uname.sysname == "Linux":
+        if platform.machine() == "aarch64":
+            return ClusterType.GRACE_HOPPER
         if uname.release.endswith("-aws"):
             # Linux kernel versions on AWS instances are of the form "5.4.0-1051-aws"
             return ClusterType.AWS
@@ -44,6 +48,7 @@ def get_checkpoint_path(cluster_type: Optional[ClusterType] = None) -> Optional[
         ClusterType.AWS: "checkpoints",
         ClusterType.FAIR: "checkpoint",
         ClusterType.RSC: "checkpoint/dino",
+        ClusterType.GRACE_HOPPER: "checkpoint",
     }
     return Path("/") / CHECKPOINT_DIRNAMES[cluster_type]
 
@@ -67,6 +72,7 @@ def get_slurm_partition(cluster_type: Optional[ClusterType] = None) -> Optional[
         ClusterType.AWS: "learnlab",
         ClusterType.FAIR: "learnlab",
         ClusterType.RSC: "learn",
+        ClusterType.GRACE_HOPPER: "gh200",
     }
     return SLURM_PARTITIONS[cluster_type]
 
@@ -90,6 +96,8 @@ def get_slurm_executor_parameters(
         del params["mem_gb"]
     elif cluster_type == ClusterType.RSC:
         params["cpus_per_task"] = 12
+    elif cluster_type == ClusterType.GRACE_HOPPER:
+        params["cpus_per_task"] = 16
     # set additional parameters / apply overrides
     params.update(kwargs)
     return params
