@@ -21,8 +21,26 @@ from dinov2.models.vision_transformer import BlockChunk
 
 try:
     from xformers.ops import fmha
+
+    XFORMERS_AVAILABLE = True
 except ImportError:
-    raise AssertionError("xFormers is required for training")
+    XFORMERS_AVAILABLE = False
+
+
+class _PseudoBlockDiagonalSplit:
+    """Fallback for fmha.BlockDiagonalMask when xFormers is not available."""
+
+    def __init__(self, tensors):
+        self.tensors = tensors
+
+    @staticmethod
+    def from_tensor_list(tensors):
+        cat = torch.cat(tensors, dim=0)
+        return _PseudoBlockDiagonalSplit(tensors), cat
+
+    def split(self, x):
+        sizes = [t.shape[0] for t in self.tensors]
+        return list(x.split(sizes, dim=0))
 
 
 logger = logging.getLogger("dinov2")
@@ -262,7 +280,10 @@ class SSLMetaArch(nn.Module):
                 ]
 
         # 2: run
-        _attn_bias, cat_inputs = fmha.BlockDiagonalMask.from_tensor_list(inputs_for_student_head_list)
+        if XFORMERS_AVAILABLE:
+            _attn_bias, cat_inputs = fmha.BlockDiagonalMask.from_tensor_list(inputs_for_student_head_list)
+        else:
+            _attn_bias, cat_inputs = _PseudoBlockDiagonalSplit.from_tensor_list(inputs_for_student_head_list)
         outputs_list = _attn_bias.split(self.student.dino_head(cat_inputs))
 
         # 3a: local crops cls tokens
