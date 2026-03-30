@@ -6,6 +6,7 @@ torchmetrics==0.10.3
 fvcore
 iopath
 xformers>=0.0.24
+webdataset
 submitit
 --extra-index-url https://pypi.nvidia.com
 cuml-cu12
