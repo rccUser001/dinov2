@@ -66,6 +66,11 @@ def get_args_parser(
         help="Request V100-32GB GPUs",
     )
     parser.add_argument(
+        "--use-hopper",
+        action="store_true",
+        help="Request Grace Hopper GH200 nodes",
+    )
+    parser.add_argument(
         "--comment",
         default="",
         type=str,
@@ -99,6 +104,8 @@ def submit_jobs(task_class, args, name: str):
     kwargs = {}
     if args.use_volta32:
         kwargs["slurm_constraint"] = "volta32gb"
+    if args.use_hopper:
+        kwargs["slurm_constraint"] = "gh200"
     if args.comment:
         kwargs["slurm_comment"] = args.comment
     if args.exclude:
