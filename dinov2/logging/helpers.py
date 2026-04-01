@@ -93,8 +93,15 @@ class MetricLogger(object):
 
         log_msg = self.delimiter.join(log_list)
         MB = 1024.0 * 1024.0
+        _DATA_STALL_THRESHOLD = 5.0  # seconds
         for obj in iterable:
-            data_time.update(time.time() - end)
+            dt = time.time() - end
+            data_time.update(dt)
+            if dt > _DATA_STALL_THRESHOLD:
+                logger.warning(
+                    f"DATA STALL at iter {i}: data_time={dt:.2f}s "
+                    f"(threshold={_DATA_STALL_THRESHOLD}s)"
+                )
             yield obj
             iter_time.update(time.time() - end)
             if i % print_freq == 0 or i == n_iterations - 1:
