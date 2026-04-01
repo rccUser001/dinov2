@@ -447,7 +447,6 @@ def do_train(cfg, model, resume=False):
 
         if torch.cuda.is_available():
             metric_logger.update(
-                gpu_util=torch.cuda.utilization(),
                 gpu_mem_gb=torch.cuda.memory_allocated() / (1024 ** 3),
                 gpu_max_mem_gb=torch.cuda.max_memory_allocated() / (1024 ** 3),
             )

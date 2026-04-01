@@ -89,7 +89,7 @@ class MetricLogger(object):
             "data: {data}",
         ]
         if torch.cuda.is_available():
-            log_list += ["max mem: {memory:.0f}", "gpu util: {gpu_util}%"]
+            log_list += ["max mem: {memory:.0f}"]
 
         log_msg = self.delimiter.join(log_list)
         MB = 1024.0 * 1024.0
@@ -111,7 +111,6 @@ class MetricLogger(object):
                             time=str(iter_time),
                             data=str(data_time),
                             memory=torch.cuda.max_memory_allocated() / MB,
-                            gpu_util=torch.cuda.utilization(),
                         )
                     )
                 else:
