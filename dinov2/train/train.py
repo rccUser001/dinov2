@@ -340,6 +340,7 @@ def do_train(cfg, model, resume=False):
         )
         # sampler_type = SamplerType.INFINITE
         sampler_type = SamplerType.SHARDED_INFINITE
+    prefetch_factor = cfg.train.get("prefetch_factor", 2)
     data_loader = make_data_loader(
         dataset=dataset,
         batch_size=cfg.train.batch_size_per_gpu,
@@ -351,6 +352,7 @@ def do_train(cfg, model, resume=False):
         drop_last=True,
         collate_fn=collate_fn,
         persistent_workers=cfg.train.num_workers > 0,
+        prefetch_factor=prefetch_factor,
     )
 
     # training loop
