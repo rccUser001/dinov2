@@ -445,6 +445,13 @@ def do_train(cfg, model, resume=False):
         metric_logger.update(total_tiles_seen=total_tiles_seen)
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
 
+        if torch.cuda.is_available():
+            metric_logger.update(
+                gpu_util=torch.cuda.utilization(),
+                gpu_mem_gb=torch.cuda.memory_allocated() / (1024 ** 3),
+                gpu_max_mem_gb=torch.cuda.max_memory_allocated() / (1024 ** 3),
+            )
+
         # checkpointing and testing
 
         if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
