@@ -340,6 +340,7 @@ def do_train(cfg, model, resume=False):
         )
         # sampler_type = SamplerType.INFINITE
         sampler_type = SamplerType.SHARDED_INFINITE
+    prefetch_factor = cfg.train.get("prefetch_factor", 2)
     data_loader = make_data_loader(
         dataset=dataset,
         batch_size=cfg.train.batch_size_per_gpu,
@@ -351,6 +352,7 @@ def do_train(cfg, model, resume=False):
         drop_last=True,
         collate_fn=collate_fn,
         persistent_workers=cfg.train.num_workers > 0,
+        prefetch_factor=prefetch_factor,
     )
 
     # training loop
@@ -444,6 +446,12 @@ def do_train(cfg, model, resume=False):
         metric_logger.update(current_batch_size=current_batch_size)
         metric_logger.update(total_tiles_seen=total_tiles_seen)
         metric_logger.update(total_loss=losses_reduced, **loss_dict_reduced)
+
+        if torch.cuda.is_available():
+            metric_logger.update(
+                gpu_mem_gb=torch.cuda.memory_allocated() / (1024 ** 3),
+                gpu_max_mem_gb=torch.cuda.max_memory_allocated() / (1024 ** 3),
+            )
 
         # checkpointing and testing
 

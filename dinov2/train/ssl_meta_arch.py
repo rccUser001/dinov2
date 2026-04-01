@@ -21,8 +21,33 @@ from dinov2.models.vision_transformer import BlockChunk
 
 try:
     from xformers.ops import fmha
+
+    XFORMERS_AVAILABLE = True
 except ImportError:
-    raise AssertionError("xFormers is required for training")
+    XFORMERS_AVAILABLE = False
+
+
+class _PseudoBlockDiagonalSplit:
+    """Fallback for fmha.BlockDiagonalMask when xFormers is not available.
+
+    fmha.BlockDiagonalMask.from_tensor_list takes a list of [1, seq_len_i, dim]
+    tensors, concatenates along the sequence dimension (dim=1), and returns a
+    block-diagonal mask plus the concatenated tensor. The .split() method
+    reverses the concatenation. The head (MLP) is applied to the concatenated
+    tensor — since it operates per-token, no cross-attention mask is needed.
+    """
+
+    def __init__(self, sizes):
+        self.sizes = sizes
+
+    @staticmethod
+    def from_tensor_list(tensors):
+        sizes = [t.shape[1] for t in tensors]
+        cat = torch.cat(tensors, dim=1)
+        return _PseudoBlockDiagonalSplit(sizes), cat
+
+    def split(self, x):
+        return list(x.split(self.sizes, dim=1))
 
 
 logger = logging.getLogger("dinov2")
@@ -262,7 +287,10 @@ class SSLMetaArch(nn.Module):
                 ]
 
         # 2: run
-        _attn_bias, cat_inputs = fmha.BlockDiagonalMask.from_tensor_list(inputs_for_student_head_list)
+        if XFORMERS_AVAILABLE:
+            _attn_bias, cat_inputs = fmha.BlockDiagonalMask.from_tensor_list(inputs_for_student_head_list)
+        else:
+            _attn_bias, cat_inputs = _PseudoBlockDiagonalSplit.from_tensor_list(inputs_for_student_head_list)
         outputs_list = _attn_bias.split(self.student.dino_head(cat_inputs))
 
         # 3a: local crops cls tokens
