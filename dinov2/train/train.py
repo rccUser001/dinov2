@@ -15,7 +15,7 @@ import torch
 from dinov2.data import SamplerType, make_data_loader, make_dataset
 from dinov2.data import (
     collate_data_and_cast, DataAugmentationDINO, DataAugmentationSlideflow,
-    MaskingGenerator)
+    DataAugmentationNone, MaskingGenerator)
 import dinov2.distributed as distributed
 from dinov2.fsdp import FSDPCheckpointer
 from dinov2.logging import MetricLogger
@@ -294,12 +294,21 @@ def do_train(cfg, model, resume=False):
 
     is_webdataset = cfg.train.dataset_path == "webdataset"
     is_slideflow = 'slideflow' in cfg.train and not is_webdataset
+    preaugmented = (
+        'slideflow' in cfg.train
+        and getattr(cfg.train.slideflow, "preaugmented", False)
+    )
+
     aug_kw = dict(
         global_crops_size=cfg.crops.global_crops_size,
         local_crops_size=cfg.crops.local_crops_size,
         convert_dtype=is_slideflow,
     )
-    if is_slideflow:
+
+    if preaugmented:
+        aug_class = DataAugmentationNone
+        logger.info("Preaugmented mode: skipping augmentations at training time")
+    elif is_slideflow:
         aug_class = DataAugmentationSlideflow
         if 'normalizer' in cfg.train.slideflow and cfg.train.slideflow.normalizer:
             aug_kw['normalizer'] = cfg.train.slideflow.normalizer
