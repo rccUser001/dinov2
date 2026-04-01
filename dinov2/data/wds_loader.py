@@ -38,7 +38,7 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
         shards_path,
         image_transform,
         shard_pattern="tiles-*.tar",
-        shuffle_buffer=200,
+        shuffle_buffer=0,
         seed=0,
     ):
         super().__init__()
