@@ -341,6 +341,14 @@ def do_train(cfg, model, resume=False):
         # sampler_type = SamplerType.INFINITE
         sampler_type = SamplerType.SHARDED_INFINITE
     prefetch_factor = cfg.train.get("prefetch_factor", 2)
+    effective_buffer_batches = (cfg.train.num_workers * prefetch_factor) / cfg.train.batch_size_per_gpu
+    logger.info(
+        f"Data loading: num_workers={cfg.train.num_workers}, prefetch_factor={prefetch_factor}, "
+        f"batch_size={cfg.train.batch_size_per_gpu} → effective prefetch buffer = "
+        f"{effective_buffer_batches:.1f} batches "
+        f"({cfg.train.num_workers * prefetch_factor} items). "
+        f"{'WARNING: buffer < 10 batches, data stalls likely!' if effective_buffer_batches < 10 else 'OK'}"
+    )
     data_loader = make_data_loader(
         dataset=dataset,
         batch_size=cfg.train.batch_size_per_gpu,
@@ -456,8 +464,11 @@ def do_train(cfg, model, resume=False):
         # checkpointing and testing
 
         if cfg.evaluation.eval_period_iterations > 0 and (iteration + 1) % cfg.evaluation.eval_period_iterations == 0:
+            import time as _time
+            _eval_start = _time.time()
             do_test(cfg, model, f"training_{iteration}")
             torch.cuda.synchronize()
+            logger.info(f"[Iter {iteration}] eval checkpoint took {_time.time() - _eval_start:.2f}s")
         periodic_checkpointer.step(iteration)
 
         iteration = iteration + 1
