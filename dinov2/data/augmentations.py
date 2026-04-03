@@ -131,69 +131,6 @@ class DataAugmentationDINO(object):
 # -----------------------------------------------------------------------------
 
 
-class DataAugmentationNone(object):
-    """No-augmentation transform for pre-augmented data.
-
-    Produces the same output dict as DataAugmentationDINO (2 global crops,
-    N local crops) but applies only deterministic resize + normalize.
-    No random cropping, flipping, color jitter, or blur.
-    """
-
-    def __init__(
-        self,
-        global_crops_scale,
-        local_crops_scale,
-        local_crops_number,
-        global_crops_size=224,
-        local_crops_size=96,
-        convert_dtype=False,
-    ):
-        self.local_crops_number = local_crops_number
-
-        if convert_dtype:
-            self.normalize = transforms.Compose([
-                transforms.ConvertImageDtype(torch.float32),
-                make_normalize_transform(),
-            ])
-        else:
-            self.normalize = transforms.Compose([
-                transforms.ToTensor(),
-                make_normalize_transform(),
-            ])
-
-        self.global_transform = transforms.Compose([
-            transforms.Resize(
-                (global_crops_size, global_crops_size),
-                interpolation=transforms.InterpolationMode.BICUBIC,
-            ),
-            self.normalize,
-        ])
-
-        self.local_transform = transforms.Compose([
-            transforms.Resize(
-                (local_crops_size, local_crops_size),
-                interpolation=transforms.InterpolationMode.BICUBIC,
-            ),
-            self.normalize,
-        ])
-
-        logger.info("###################################")
-        logger.info("Using NO augmentations (preaugmented mode)")
-        logger.info(f"global_crops_size: {global_crops_size}")
-        logger.info(f"local_crops_size: {local_crops_size}")
-        logger.info(f"local_crops_number: {local_crops_number}")
-        logger.info("###################################")
-
-    def __call__(self, image):
-        output = {}
-        global_crop = self.global_transform(image)
-        output["global_crops"] = [global_crop, global_crop.clone()]
-        output["global_crops_teacher"] = [global_crop, global_crop.clone()]
-        output["local_crops"] = [self.local_transform(image) for _ in range(self.local_crops_number)]
-        output["offsets"] = ()
-        return output
-
-
 class RandomStainAugment:
     """Transformation to apply random stain augmentation."""
 

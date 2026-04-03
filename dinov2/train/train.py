@@ -15,7 +15,7 @@ import torch
 from dinov2.data import SamplerType, make_data_loader, make_dataset
 from dinov2.data import (
     collate_data_and_cast, DataAugmentationDINO, DataAugmentationSlideflow,
-    DataAugmentationNone, MaskingGenerator)
+    MaskingGenerator)
 import dinov2.distributed as distributed
 from dinov2.fsdp import FSDPCheckpointer
 from dinov2.logging import MetricLogger
@@ -299,31 +299,32 @@ def do_train(cfg, model, resume=False):
         and getattr(cfg.train.slideflow, "preaugmented", False)
     )
 
-    aug_kw = dict(
-        global_crops_size=cfg.crops.global_crops_size,
-        local_crops_size=cfg.crops.local_crops_size,
-        convert_dtype=is_slideflow,
-    )
+    data_transform = None
+    if not preaugmented:
+        aug_kw = dict(
+            global_crops_size=cfg.crops.global_crops_size,
+            local_crops_size=cfg.crops.local_crops_size,
+            convert_dtype=is_slideflow,
+        )
 
-    if preaugmented:
-        aug_class = DataAugmentationNone
-        logger.info("Preaugmented mode: skipping augmentations at training time")
-    elif is_slideflow:
-        aug_class = DataAugmentationSlideflow
-        if 'normalizer' in cfg.train.slideflow and cfg.train.slideflow.normalizer:
-            aug_kw['normalizer'] = cfg.train.slideflow.normalizer
-            logger.info("Using slideflow data augmentation with normalizer: {}".format(
-                aug_kw['normalizer']
-            ))
+        if is_slideflow:
+            aug_class = DataAugmentationSlideflow
+            if 'normalizer' in cfg.train.slideflow and cfg.train.slideflow.normalizer:
+                aug_kw['normalizer'] = cfg.train.slideflow.normalizer
+                logger.info("Using slideflow data augmentation with normalizer: {}".format(
+                    aug_kw['normalizer']
+                ))
+        else:
+            aug_class = DataAugmentationDINO
+
+        data_transform = aug_class(
+            cfg.crops.global_crops_scale,
+            cfg.crops.local_crops_scale,
+            cfg.crops.local_crops_number,
+            **aug_kw
+        )
     else:
-        aug_class = DataAugmentationDINO
-
-    data_transform = aug_class(
-        cfg.crops.global_crops_scale,
-        cfg.crops.local_crops_scale,
-        cfg.crops.local_crops_number,
-        **aug_kw
-    )
+        logger.info("Preaugmented mode: skipping augmentations at training time")
 
     collate_fn = partial(
         collate_data_and_cast,
