@@ -20,22 +20,51 @@ def _skip_and_log(exn):
     return True
 
 
+def _collect_shards(shards_path, shard_pattern):
+    """Collect shard URLs from one or more directories, searching subdirectories.
+
+    Args:
+        shards_path: Single directory path (str) or list of directory paths.
+        shard_pattern: Glob pattern for shard files (e.g. "shard-*.tar").
+            Searched recursively in all subdirectories.
+
+    Returns:
+        Sorted list of shard file paths.
+    """
+    if isinstance(shards_path, str):
+        shards_path = [shards_path]
+
+    shard_urls = []
+    for path in shards_path:
+        # Search in the directory itself and all subdirectories
+        found = glob.glob(os.path.join(path, "**", shard_pattern), recursive=True)
+        # Also check the directory root (glob ** doesn't always include root)
+        found += glob.glob(os.path.join(path, shard_pattern))
+        found = list(set(found))  # deduplicate
+        logger.info(f"  {path}: {len(found)} shards matching '{shard_pattern}' (recursive)")
+        shard_urls.extend(found)
+
+    shard_urls.sort()
+    if len(shard_urls) == 0:
+        raise FileNotFoundError(
+            f"No shards matching '{shard_pattern}' found in {shards_path}"
+        )
+    return shard_urls
+
+
 class WebDatasetWrapper(torch.utils.data.IterableDataset):
     """PyTorch IterableDataset that streams images from WebDataset tar shards.
 
-    Streams from tar shards in a directory, applies DINOv2 augmentations,
-    and provides infinite iteration with pseudorandom shard-level and
-    sample-level shuffling. Uses wds.split_by_node and wds.split_by_worker
-    for distributed sharding.
+    Streams from tar shards in one or more directories, applies DINOv2
+    augmentations, and provides infinite iteration with pseudorandom
+    shard-level shuffling.
 
     Args:
-        shards_path: Directory containing tar shard files.
+        shards_path: Directory (str) or list of directories containing tar shards.
         image_transform: Callable (e.g. DataAugmentationDINO) applied to each PIL image.
-        shard_pattern: Glob pattern for shard files relative to shards_path.
-            Defaults to "tiles-*.tar".
+        shard_pattern: Glob pattern for shard files. Defaults to "tiles-*.tar".
         shuffle_buffer: Number of samples for in-memory shuffle buffer (0 to disable).
-        seed: Base seed for pseudorandom shard shuffling. Each epoch uses
-            seed + epoch_number for reproducible but varying order.
+        seed: Base seed for pseudorandom shard shuffling.
     """
 
     def __init__(
@@ -47,24 +76,14 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
         seed=0,
     ):
         super().__init__()
-        self.shards_path = shards_path
         self.image_transform = image_transform
         self.shard_pattern = shard_pattern
         self.shuffle_buffer = shuffle_buffer
         self.seed = seed
         self._epoch = 0
 
-        self.shard_urls = sorted(
-            glob.glob(os.path.join(shards_path, shard_pattern))
-        )
-        if len(self.shard_urls) == 0:
-            raise FileNotFoundError(
-                f"No shards matching '{shard_pattern}' found in {shards_path}"
-            )
-        logger.info(
-            f"WebDataset: found {len(self.shard_urls)} shards "
-            f"matching '{shard_pattern}' in {shards_path}"
-        )
+        self.shard_urls = _collect_shards(shards_path, shard_pattern)
+        logger.info(f"WebDataset: {len(self.shard_urls)} total shards")
 
     def _get_shuffled_shards(self):
         """Return shard URLs in pseudorandom order for the current epoch."""
@@ -110,7 +129,7 @@ class PreaugmentedWebDataset(torch.utils.data.IterableDataset):
     Produces the same output dict format as DataAugmentationDINO.
 
     Args:
-        shards_path: Directory containing tar shard files.
+        shards_path: Directory (str) or list of directories containing tar shards.
         n_global_crops: Number of global crops per sample (default: 2).
         n_local_crops: Number of local crops per sample (default: 8).
         shard_pattern: Glob pattern for shard files. Default "shard-*.tar".
@@ -128,7 +147,6 @@ class PreaugmentedWebDataset(torch.utils.data.IterableDataset):
         seed=0,
     ):
         super().__init__()
-        self.shards_path = shards_path
         self.n_global_crops = n_global_crops
         self.n_local_crops = n_local_crops
         self.shard_pattern = shard_pattern
@@ -141,17 +159,8 @@ class PreaugmentedWebDataset(torch.utils.data.IterableDataset):
             make_normalize_transform(),
         ])
 
-        self.shard_urls = sorted(
-            glob.glob(os.path.join(shards_path, shard_pattern))
-        )
-        if len(self.shard_urls) == 0:
-            raise FileNotFoundError(
-                f"No shards matching '{shard_pattern}' found in {shards_path}"
-            )
-        logger.info(
-            f"PreaugmentedWebDataset: found {len(self.shard_urls)} shards "
-            f"in {shards_path}"
-        )
+        self.shard_urls = _collect_shards(shards_path, shard_pattern)
+        logger.info(f"PreaugmentedWebDataset: {len(self.shard_urls)} total shards")
 
     def _decode_sample(self, sample):
         """Decode a sample with per-crop JPEGs into the dict format
@@ -216,7 +225,8 @@ def make_webdataset(cfg_train, image_transform):
     """Factory function to create a WebDataset from config.
 
     Config keys read from cfg_train.slideflow:
-        webdataset_path (str): Directory containing shard tar files.
+        webdataset_path (str or list[str]): Directory or list of directories
+            containing shard tar files. Subdirectories are searched recursively.
         shard_pattern (str, optional): Glob pattern for shards.
         shuffle_buffer (int, optional): Sample shuffle buffer size. Default 0.
         seed (int, optional): Base seed for shard shuffling. Default 0.
@@ -232,6 +242,9 @@ def make_webdataset(cfg_train, image_transform):
     """
     sf_cfg = cfg_train.slideflow
     shards_path = sf_cfg.webdataset_path
+    # Support both string and list in config
+    if hasattr(shards_path, '__iter__') and not isinstance(shards_path, str):
+        shards_path = list(shards_path)
     preaugmented = getattr(sf_cfg, "preaugmented", False)
 
     kwargs = {}
