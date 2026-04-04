@@ -74,6 +74,7 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
         shard_pattern="tiles-*.tar",
         shuffle_buffer=0,
         seed=0,
+        shard_urls=None,
     ):
         super().__init__()
         self.image_transform = image_transform
@@ -82,7 +83,10 @@ class WebDatasetWrapper(torch.utils.data.IterableDataset):
         self.seed = seed
         self._epoch = 0
 
-        self.shard_urls = _collect_shards(shards_path, shard_pattern)
+        if shard_urls:
+            self.shard_urls = sorted(shard_urls)
+        else:
+            self.shard_urls = _collect_shards(shards_path, shard_pattern)
         logger.info(f"WebDataset: {len(self.shard_urls)} total shards")
 
     def _get_shuffled_shards(self):
@@ -145,6 +149,7 @@ class PreaugmentedWebDataset(torch.utils.data.IterableDataset):
         shard_pattern="shard-*.tar",
         shuffle_buffer=0,
         seed=0,
+        shard_urls=None,
     ):
         super().__init__()
         self.n_global_crops = n_global_crops
@@ -159,7 +164,10 @@ class PreaugmentedWebDataset(torch.utils.data.IterableDataset):
             make_normalize_transform(),
         ])
 
-        self.shard_urls = _collect_shards(shards_path, shard_pattern)
+        if shard_urls:
+            self.shard_urls = sorted(shard_urls)
+        else:
+            self.shard_urls = _collect_shards(shards_path, shard_pattern)
         logger.info(f"PreaugmentedWebDataset: {len(self.shard_urls)} total shards")
 
     def _decode_sample(self, sample):
@@ -254,6 +262,13 @@ def make_webdataset(cfg_train, image_transform):
         kwargs["shuffle_buffer"] = sf_cfg.shuffle_buffer
     if hasattr(sf_cfg, "seed") and sf_cfg.seed is not None:
         kwargs["seed"] = sf_cfg.seed
+
+    # If explicit shard_urls are provided, use them directly
+    explicit_urls = getattr(sf_cfg, "shard_urls", None)
+    if explicit_urls and len(explicit_urls) > 0:
+        explicit_urls = list(explicit_urls)
+        kwargs["shard_urls"] = explicit_urls
+        logger.info(f"Using {len(explicit_urls)} explicit shard URLs from config")
 
     if preaugmented:
         n_local = cfg_train.crops.local_crops_number if hasattr(cfg_train, "crops") else 8
