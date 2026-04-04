@@ -188,6 +188,15 @@ class PreaugmentedWebDataset(torch.utils.data.IterableDataset):
         global_crops = [t for _, t in sorted(global_crops)]
         local_crops = [t for _, t in sorted(local_crops)]
 
+        # Validate crop counts — skip malformed samples
+        if len(global_crops) != self.n_global_crops or len(local_crops) != self.n_local_crops:
+            sample_key = sample.get("__key__", "unknown")
+            raise ValueError(
+                f"Sample {sample_key}: expected {self.n_global_crops} global and "
+                f"{self.n_local_crops} local crops, got {len(global_crops)} global "
+                f"and {len(local_crops)} local. Keys: {[k for k in sample.keys()]}"
+            )
+
         output = {
             "global_crops": global_crops,
             "local_crops": local_crops,
@@ -216,7 +225,7 @@ class PreaugmentedWebDataset(torch.utils.data.IterableDataset):
             nodesplitter=wds.split_by_node,
             workersplitter=wds.split_by_worker,
             handler=self._warn_and_continue,
-        ).map(self._decode_sample)
+        ).map(self._decode_sample, handler=self._warn_and_continue)
         if self.shuffle_buffer > 0:
             pipeline = pipeline.shuffle(self.shuffle_buffer)
         return pipeline
