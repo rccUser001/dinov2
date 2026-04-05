@@ -16,7 +16,10 @@ from torch.distributed.fsdp import MixedPrecision
 from torch.distributed.fsdp import StateDictType
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
-from torch.distributed.fsdp._runtime_utils import _reshard
+try:
+    from torch.distributed.fsdp._runtime_utils import _reshard
+except ImportError:
+    _reshard = None
 
 
 def get_fsdp_wrapper(model_cfg, modules_to_wrap=set()):
@@ -64,9 +67,11 @@ def is_sharded_fsdp(x):
 
 def free_if_fsdp(x):
     if is_sharded_fsdp(x):
-        handles = x._handles
-        true_list = [True for h in handles]
-        _reshard(x, handles, true_list)
+        # _handles and _reshard were removed in PyTorch 2.1+.
+        # With SHARD_GRAD_OP, FSDP reshards automatically after forward.
+        handles = getattr(x, "_handles", None)
+        if handles is not None and _reshard is not None:
+            _reshard(x, handles, [True for h in handles])
 
 
 def get_fsdp_modules(x):
