@@ -379,6 +379,17 @@ def do_train(cfg, model, resume=False):
     total_tiles_seen = start_iter * cfg.train.batch_size_per_gpu * distributed.get_global_size()
 
     logger.info("Starting training from iteration {}".format(start_iter))
+
+    # Always record an initial ("0th") evaluation checkpoint on fresh runs, so
+    # downstream analysis can observe the model's starting point regardless of
+    # cfg.evaluation.eval_period_iterations. Skipped on resume to avoid
+    # overwriting a prior run's teacher checkpoint.
+    if start_iter == 0:
+        logger.info("Recording initial evaluation checkpoint at iteration 0")
+        do_test(cfg, model, "training_0")
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
     metrics_file = os.path.join(cfg.train.output_dir, "training_metrics.json")
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
