@@ -37,4 +37,13 @@ def build_model(args, only_teacher=False, img_size=224):
 
 
 def build_model_from_cfg(cfg, only_teacher=False):
-    return build_model(cfg.student, only_teacher=only_teacher, img_size=cfg.crops.global_crops_size)
+    # `pretrained_weights_img_size`, if set, sizes the pos_embed parameter to
+    # match the checkpoint's native training resolution (e.g. 518 for Meta's
+    # ViT-L/14 DINOv2). The model's interpolate_pos_encoding() then downsamples
+    # on the fly to the actual training crop size at each forward pass. This
+    # preserves the full pretrained spatial grid instead of throwing it away
+    # via strict=False shape-mismatch skipping.
+    img_size = cfg.student.get("pretrained_weights_img_size", None)
+    if img_size is None:
+        img_size = cfg.crops.global_crops_size
+    return build_model(cfg.student, only_teacher=only_teacher, img_size=img_size)

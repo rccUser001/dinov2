@@ -70,7 +70,34 @@ class SSLMetaArch(nn.Module):
         if cfg.student.pretrained_weights:
             chkpt = torch.load(cfg.student.pretrained_weights)
             logger.info(f"OPTIONS -- pretrained weights: loading from {cfg.student.pretrained_weights}")
-            student_backbone.load_state_dict(chkpt["model"], strict=False)
+            # Guard: load_state_dict(strict=False) silently skips parameters
+            # whose shapes don't match. That's catastrophic for pos_embed --
+            # a silent skip means training starts with a freshly-initialized
+            # (trunc_normal) pos_embed on top of pretrained attention weights.
+            # If this fires, set `student.pretrained_weights_img_size` to the
+            # checkpoint's native training resolution (e.g. 518 for Meta
+            # ViT-L/14) so the student is built with a matching pos_embed,
+            # and the model's interpolate_pos_encoding() downsamples on the
+            # fly each forward pass.
+            ckpt_pe = chkpt["model"].get("pos_embed")
+            if ckpt_pe is not None and ckpt_pe.shape != student_backbone.pos_embed.shape:
+                raise RuntimeError(
+                    f"pos_embed shape mismatch when loading pretrained weights: "
+                    f"checkpoint {tuple(ckpt_pe.shape)} vs student "
+                    f"{tuple(student_backbone.pos_embed.shape)}. Set "
+                    f"student.pretrained_weights_img_size to the checkpoint's "
+                    f"native resolution (e.g. 518 for Meta ViT-L/14) so the "
+                    f"pretrained pos_embed loads cleanly and is interpolated "
+                    f"on the fly to the training crop size."
+                )
+            missing, unexpected = student_backbone.load_state_dict(chkpt["model"], strict=False)
+            logger.info(
+                f"pretrained load: missing={len(missing)} unexpected={len(unexpected)}"
+            )
+            if missing:
+                logger.info(f"pretrained load missing keys: {missing}")
+            if unexpected:
+                logger.info(f"pretrained load unexpected keys: {unexpected}")
 
         self.embed_dim = embed_dim
         self.dino_out_dim = cfg.dino.head_n_prototypes
