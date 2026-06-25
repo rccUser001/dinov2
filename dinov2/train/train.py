@@ -501,6 +501,9 @@ def main(args):
     cfg = setup(args)
 
     model = SSLMetaArch(cfg).to(torch.device("cuda"))
+    # ── LoRA: freeze backbone, add low-rank adapters (no-op if cfg.lora.enabled is false) ──
+    from dinov2.train.lora import maybe_apply_lora_to_ssl_meta_arch
+    maybe_apply_lora_to_ssl_meta_arch(model, cfg)
     model.prepare_for_distributed_training()
 
     logger.info("Model:\n{}".format(model))
