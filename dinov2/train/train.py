@@ -252,7 +252,7 @@ def do_test(cfg, model, iteration):
 
 def do_train(cfg, model, resume=False):
     model.train()
-    inputs_dtype = torch.half
+    inputs_dtype = torch.bfloat16  # was: torch.half — bf16 forward compute avoids fp16 overflow
     fp16_scaler = model.fp16_scaler  # for mixed precision training
 
     # setup optimizer
