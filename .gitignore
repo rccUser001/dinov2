@@ -9,3 +9,14 @@ dist/
 *.swp
 
 .vscode/
+
+# data and model weights — never commit; use dataset URLs instead
+outputs/
+*.pt
+*.h5
+*.h5.gz
+torch_hub_cache/
+hf_cache/
+logs/
+_local.sh
+*.run.sh
